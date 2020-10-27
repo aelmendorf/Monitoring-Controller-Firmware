@@ -8,7 +8,7 @@ void MonitorController::Init() {
 	this->hardwareMaintMode = false;
 	this->softwareMaintMode = false;
 	this->State = OKAY;
-	analogWriteResolution(10);
+	//analogWriteResolution(10);
 	this->SetupServer();
 
 	for (int i = 0; i < MB_N_C; i++) {
@@ -49,12 +49,10 @@ void MonitorController::SetupServer() {
 		Serial.println("Ethernet cable is not connected");
 #endif
 	}
-	this->server->begin();
-
+	/*this->server->begin();*/
 #if DEBUG
 	Serial.print("Ethernet Connected.  IP: "); Serial.println(Ethernet.localIP());
 	this->Print();
-	
 #endif
 
 }
@@ -63,18 +61,19 @@ void MonitorController::ReadAnalog() {
 	for (int i = 0; i < AnalogInputPins; i++) {
 		float read = 0;
 		for (int x = 0; x < AVG; x++) {
-			float val = P1.readAnalog(2, i+1);
-			read += val;
+			float inputCounts = P1.readAnalog(AnalogInputSlot, i+1);
+			float value = CurrentMax * ((float)inputCounts / Bit13Reg);
+			read += value;
 		}
-		read = read / AVG;
-		this->AnalogValues[i] = (read / Step);
+		this->AnalogValues[i] = (read / AVG);
 		delay(1);
+
 	}
 }
 
 void MonitorController::ReadDigital() {
 	for (int i = 0; i < DigitalInputPins; i++) {
-		this->DigitalInputs[i]=P1.readDiscrete(1, i+1);
+		this->DigitalInputs[i]=P1.readDiscrete(DiscreteInputSlot, i+1);
 	}
 
 	if (this->DigitalInputs[KeySwitchIndex]) {
@@ -95,21 +94,16 @@ void MonitorController::UpdateModbus() {
 		this->modbus.C[i] = this->DigitalInputs[i];
 	}
 
-	int offset = DigitalInputPins;
-
 	if (!modbus.C[CoilComIndex]) {
-		offset = AnalogInputPins;
 		for (int i = 0; i < DigitalOutputPins; i++) {
-			this->modbus.R[i + offset] = this->ModbusOutputValues[i];
+			this->modbus.R[i + AnalogInputPins] = this->ModbusOutputValues[i];
 		}
 	}
-	offset = DigitalOutputPins + AnalogInputPins;
-	this->modbus.R[offset] = this->State;
+	this->modbus.R[StateIndex] = this->State;
 }
 
 void MonitorController::CheckCom() {
 	if (this->modbus.C[CoilComIndex]) {
-
 		this->softwareMaintMode = this->modbus.C[SoftMaintModeIndex];
 		this->alarm = this->modbus.C[AlarmIndex];
 		this->warning = this->modbus.C[WarningIndex];
@@ -184,7 +178,7 @@ void MonitorController::Run() {
 		this->CheckCom();
 		this->CheckState();
 		this->UpdateModbus();
-		this->BroadcastWeb();
+		//this->BroadcastWeb();
 		this->lastLoop += LoopTime;
 	}
 #if DEBUG
@@ -199,51 +193,64 @@ void MonitorController::DisplaySystemOkay() {
 	this->ModbusOutputValues[SystemOkayIndex] = LOW;
 	this->ModbusOutputValues[SystemWarningIndex] = HIGH;
 	this->ModbusOutputValues[SystemAlarmIndex] = HIGH;
-	digitalWrite(SystemOkayIndex, LOW);
-	digitalWrite(SystemWarningIndex, HIGH);
-	digitalWrite(SystemAlarmIndex, HIGH);
+	P1.writeDiscrete(1, 3, SystemOkayIndex);
+	P1.writeDiscrete(0, 3, SystemWarningIndex);
+	P1.writeDiscrete(0, 3, SystemAlarmIndex);
+	//digitalWrite(SystemOkayIndex, LOW);
+	//digitalWrite(SystemWarningIndex, HIGH);
+	//digitalWrite(SystemAlarmIndex, HIGH);
 }
 
 void MonitorController::DisplaySystemWarning() {
 	this->ModbusOutputValues[SystemOkayIndex] = HIGH;
 	this->ModbusOutputValues[SystemWarningIndex] = LOW;
 	this->ModbusOutputValues[SystemAlarmIndex] = HIGH;
-	digitalWrite(SystemOkayIndex, HIGH);
-	digitalWrite(SystemWarningIndex, LOW);
-	digitalWrite(SystemAlarmIndex, HIGH);
+	P1.writeDiscrete(0, DigitalOutputSlot, SystemOkayIndex);
+	P1.writeDiscrete(1, DigitalOutputSlot, SystemWarningIndex);
+	P1.writeDiscrete(0, DigitalOutputSlot, SystemAlarmIndex);
+	//digitalWrite(SystemOkayIndex, HIGH);
+	//digitalWrite(SystemWarningIndex, LOW);
+	//digitalWrite(SystemAlarmIndex, HIGH);
 }
 
 void MonitorController::DisplaySystemAlarm() {
 	this->ModbusOutputValues[SystemOkayIndex] = HIGH;
 	this->ModbusOutputValues[SystemWarningIndex] = HIGH;
 	this->ModbusOutputValues[SystemAlarmIndex] = LOW;
-	digitalWrite(SystemOkayIndex, HIGH);
-	digitalWrite(SystemWarningIndex, HIGH);
-	digitalWrite(SystemAlarmIndex, LOW);
+	P1.writeDiscrete(0, DigitalOutputSlot, SystemOkayIndex);
+	P1.writeDiscrete(0, DigitalOutputSlot, SystemWarningIndex);
+	P1.writeDiscrete(1, DigitalOutputSlot, SystemAlarmIndex);
+	//digitalWrite(SystemOkayIndex, HIGH);
+	//digitalWrite(SystemWarningIndex, HIGH);
+	//digitalWrite(SystemAlarmIndex, LOW);
 }
 
 void MonitorController::DisplayMaintenance() {
 	this->ModbusOutputValues[SystemOkayIndex] = LOW;
 	this->ModbusOutputValues[SystemWarningIndex] = LOW;
 	this->ModbusOutputValues[SystemAlarmIndex] = HIGH;
-	digitalWrite(SystemOkayIndex, LOW);
-	digitalWrite(SystemWarningIndex, LOW);
-	digitalWrite(SystemAlarmIndex, HIGH);
+	P1.writeDiscrete(1, DigitalOutputSlot, SystemOkayIndex);
+	P1.writeDiscrete(1, DigitalOutputSlot, SystemWarningIndex);
+	P1.writeDiscrete(0, DigitalOutputSlot, SystemAlarmIndex);
+	//digitalWrite(SystemOkayIndex, LOW);
+	//digitalWrite(SystemWarningIndex, LOW);
+	//digitalWrite(SystemAlarmIndex, HIGH);
 }
 
 void MonitorController::Print() {
-	Serial.println("Digital Pull-up Pins");
+	Serial.println("Discrete Input:");
 	for (int i = 0; i < DigitalInputPins; i++) {
-		Serial.print(" P"); Serial.print(i);
-		if (this->DigitalInputs[i]) {
-			Serial.print(": High");
-		}
-		else {
-			Serial.print(": Low");
-		}
+		Serial.print(" P"); Serial.print(i); Serial.print("=");
+		Serial.print(this->DigitalInputs[i]); 
+		//if (this->DigitalInputs[i]) {
+		//	Serial.print(": High");
+		//}
+		//else {
+		//	Serial.print(": Low");
+		//}
 	}
-
-	Serial.println("Analog Pins");
+	Serial.println();
+	Serial.println("Analog Input:");
 	for (int i = 0; i < AnalogInputPins; i++) {
 		Serial.print(" P"); Serial.print(i);
 		Serial.print(": "); Serial.print(this->AnalogValues[i]);
@@ -252,67 +259,67 @@ void MonitorController::Print() {
 }
 
 void MonitorController::BroadcastWeb() {
-	this->client = this->server->available();
-	if (client) {
-		boolean currentLineIsBlank = true;
-		if (client.available()) {
-			char c = client.read();
-			Serial.write(c);
-			// if you've gotten to the end of the line (received a newline
-			// character) and the line is blank, the http request has ended,
-			// so you can send a reply
-			while(c!='\n' && !currentLineIsBlank){
-			}
-			if (c == '\n' && currentLineIsBlank) {
-				// send a standard http response header
-				client.println("HTTP/1.1 200 OK");
-				client.println("Content-Type: text/html");
-				client.println("Connection: close");  // the connection will be closed after completion of the response
-				client.println("Refresh: 5");  // refresh the page automatically every 5 sec
-				client.println();
-				client.println("<!DOCTYPE HTML>");
-				client.println("<html>"); //Start our HTML here
-				client.println("<head>");
-				client.println("<style>");
-				client.println("table, th, td {");
-				client.println("border: 1px solid black;");
-				client.println("border-collapse: collapse;");
-				client.println("}");
-				client.println("</style>");
-				client.println("</head>");
-				client.println("<body>");
-				client.println("<h1>Facility Monitoring Web</h1>");  //Print the title
-				client.println("<br>");
+	//this->client = this->server->available();
+	//if (client) {
+	//	boolean currentLineIsBlank = true;
+	//	if (client.available()) {
+	//		char c = client.read();
+	//		Serial.write(c);
+	//		// if you've gotten to the end of the line (received a newline
+	//		// character) and the line is blank, the http request has ended,
+	//		// so you can send a reply
+	//		while(c!='\n' && !currentLineIsBlank){
+	//		}
+	//		if (c == '\n' && currentLineIsBlank) {
+	//			// send a standard http response header
+	//			client.println("HTTP/1.1 200 OK");
+	//			client.println("Content-Type: text/html");
+	//			client.println("Connection: close");  // the connection will be closed after completion of the response
+	//			client.println("Refresh: 5");  // refresh the page automatically every 5 sec
+	//			client.println();
+	//			client.println("<!DOCTYPE HTML>");
+	//			client.println("<html>"); //Start our HTML here
+	//			client.println("<head>");
+	//			client.println("<style>");
+	//			client.println("table, th, td {");
+	//			client.println("border: 1px solid black;");
+	//			client.println("border-collapse: collapse;");
+	//			client.println("}");
+	//			client.println("</style>");
+	//			client.println("</head>");
+	//			client.println("<body>");
+	//			client.println("<h1>Facility Monitoring Web</h1>");  //Print the title
+	//			client.println("<br>");
 
-				client.println("<table>");
-				client.println("<tr>");
-				client.println("<th>Channel</th>");
-				client.println("<th>Value</th>");
-				client.println("</tr>");
+	//			client.println("<table>");
+	//			client.println("<tr>");
+	//			client.println("<th>Channel</th>");
+	//			client.println("<th>Value</th>");
+	//			client.println("</tr>");
 
-				for (int i = 0; i < AnalogInputPins; i++) {		
-					client.println("<tr>");
-					client.print("<td>");
-					client.print(this->AnalogValues[i]);	
-					client.println("</td>");
-					client.print("<td>");
-					client.print("A"); client.print(i + 1);
-					client.println("<td>");
-					client.println("</tr>");
-				}
+	//			for (int i = 0; i < AnalogInputPins; i++) {		
+	//				client.println("<tr>");
+	//				client.print("<td>");
+	//				client.print(this->AnalogValues[i]);	
+	//				client.println("</td>");
+	//				client.print("<td>");
+	//				client.print("A"); client.print(i + 1);
+	//				client.println("<td>");
+	//				client.println("</tr>");
+	//			}
 
-				client.println("</table>");
-				client.println("</body>");
-				client.println("</html>");  //Our HTML ends here
-			}
-			if (c == '\n') {
-				// you're starting a new line
-				currentLineIsBlank = true;
-			}
-			else if (c != '\r') {
-				// you've gotten a character on the current line
-				currentLineIsBlank = false;
-			}
-		}
-	}
+	//			client.println("</table>");
+	//			client.println("</body>");
+	//			client.println("</html>");  //Our HTML ends here
+	//		}
+	//		if (c == '\n') {
+	//			// you're starting a new line
+	//			currentLineIsBlank = true;
+	//		}
+	//		else if (c != '\r') {
+	//			// you've gotten a character on the current line
+	//			currentLineIsBlank = false;
+	//		}
+	//	}
+	//}
 }
